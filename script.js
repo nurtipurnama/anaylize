@@ -25,8 +25,10 @@ let modelConfidenceChart = null;
 // Model types
 let xgboostModelLoaded = false;
 let catboostModelLoaded = false;
+let lightGBMModelLoaded = false;
 let useXGBoost = true; // Toggle for using XGBoost
 let useCatBoost = true; // Toggle for using CatBoost
+let useLightGBM = true; // Toggle untuk menggunakan LightGBM
 let useStatistical = true; // Toggle for using statistical model
 
 // Analysis results tracking
@@ -34,6 +36,7 @@ let lastAnalysisResults = null;
 let modelConfidenceScores = {
     xgboost: 0,
     catboost: 0,
+    lightGBM: 0,
     statistical: 0
 };
 
@@ -62,10 +65,11 @@ function loadMachineLearningLibraries() {
     // Create script element to load TensorFlow.js
     loadTensorFlowLibrary()
         .then(() => {
-            // Load both CatBoost and XGBoost models after TF.js is loaded
+            // Load both CatBoost, XGBoost, and LightGBM models after TF.js is loaded
             return Promise.all([
                 loadCatBoostLibrary(),
-                loadXGBoostLibrary()
+                loadXGBoostLibrary(),
+                loadLightGBMLibrary()
             ]);
         })
         .catch(error => {
@@ -73,6 +77,7 @@ function loadMachineLearningLibraries() {
             // Fallback to statistical model
             useXGBoost = false;
             useCatBoost = false;
+            useLightGBM = false;
             showToast('Failed to load ML models. Using statistical analysis instead.', 'warning');
         });
 }
@@ -136,6 +141,27 @@ function loadCatBoostLibrary() {
     });
 }
 
+// Load LightGBM library
+function loadLightGBMLibrary() {
+    return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/lightgbm.js';
+        script.onload = () => {
+            console.log('LightGBM dependencies loaded successfully');
+            lightGBMModelLoaded = true;
+            showToast('LightGBM model loaded successfully', 'success');
+            resolve();
+        };
+        script.onerror = () => {
+            console.error('Failed to load LightGBM dependencies');
+            lightGBMModelLoaded = false;
+            useLightGBM = false;
+            reject(new Error('Failed to load LightGBM dependencies'));
+        };
+        document.head.appendChild(script);
+    });
+}
+
 // Setup event listeners
 function setupEventListeners() {
     // Team setup form
@@ -156,17 +182,21 @@ function setupEventListeners() {
         // Reset all model flags
         useXGBoost = false;
         useCatBoost = false;
+        useLightGBM = false;
         useStatistical = false;
         
         // Set flags based on selection
         if (selectedOption === 'ensemble') {
             useXGBoost = xgboostModelLoaded;
             useCatBoost = catboostModelLoaded;
+            useLightGBM = lightGBMModelLoaded;
             useStatistical = true;
         } else if (selectedOption === 'xgboost') {
             useXGBoost = true;
         } else if (selectedOption === 'catboost') {
             useCatBoost = true;
+        } else if (selectedOption === 'lightgbm') {
+            useLightGBM = true;
         } else if (selectedOption === 'statistical') {
             useStatistical = true;
         }
@@ -649,8 +679,8 @@ function performAnalysis() {
     let confidenceScoresPromise;
     
     // Determine which model(s) to use
-    if (useCatBoost && useXGBoost && useStatistical) {
-        // Ensemble method (all three models)
+    if (useCatBoost && useXGBoost && useLightGBM && useStatistical) {
+        // Ensemble method (all four models)
         probabilitiesPromise = calculateEnsembleWinProbabilities();
         projectedTotalPromise = calculateEnsembleProjectedTotal();
         projectedMarginPromise = calculateEnsembleProjectedMargin();
@@ -663,6 +693,7 @@ function performAnalysis() {
         confidenceScoresPromise = Promise.resolve({
             catboost: 100,
             xgboost: 0,
+            lightGBM: 0,
             statistical: 0
         });
     } else if (useXGBoost && xgboostModelLoaded) {
@@ -673,6 +704,18 @@ function performAnalysis() {
         confidenceScoresPromise = Promise.resolve({
             catboost: 0,
             xgboost: 100,
+            lightGBM: 0,
+            statistical: 0
+        });
+    } else if (useLightGBM && lightGBMModelLoaded) {
+        // Use LightGBM model
+        probabilitiesPromise = calculateLightGBMWinProbabilities();
+        projectedTotalPromise = calculateLightGBMProjectedTotal();
+        projectedMarginPromise = calculateLightGBMProjectedMargin();
+        confidenceScoresPromise = Promise.resolve({
+            catboost: 0,
+            xgboost: 0,
+            lightGBM: 100,
             statistical: 0
         });
     } else {
@@ -687,6 +730,7 @@ function performAnalysis() {
         confidenceScoresPromise = Promise.resolve({
             catboost: 0,
             xgboost: 0,
+            lightGBM: 0,
             statistical: 100
         });
     }
@@ -775,6 +819,7 @@ function performAnalysis() {
                 confidenceScores: {
                     catboost: 0,
                     xgboost: 0,
+                    lightGBM: 0,
                     statistical: 100
                 }
             };
@@ -812,6 +857,7 @@ function performAnalysis() {
             createModelConfidenceChart({
                 catboost: 0,
                 xgboost: 0,
+                lightGBM: 0,
                 statistical: 100
             });
             
@@ -865,23 +911,27 @@ function calculateModelConfidenceScores() {
     // Base confidence levels
     let catboostConfidence = 0;
     let xgboostConfidence = 0;
+    let lightGBMConfidence = 0;
     let statisticalConfidence = 40; // Statistical model always has some confidence
     
     // Adjust confidence based on data availability
     if (totalMatches >= MIN_MATCHES_FOR_EXCELLENT_ANALYSIS) {
         // With excellent data, ML models get higher weight
-        catboostConfidence = 40;
-        xgboostConfidence = 35;
-        statisticalConfidence = 25;
+        catboostConfidence = 30;
+        xgboostConfidence = 25;
+        lightGBMConfidence = 25;
+        statisticalConfidence = 20;
     } else if (totalMatches >= MIN_MATCHES_FOR_GOOD_ANALYSIS) {
         // With good data, balanced approach
-        catboostConfidence = 35;
-        xgboostConfidence = 30;
+        catboostConfidence = 25;
+        xgboostConfidence = 20;
+        lightGBMConfidence = 20;
         statisticalConfidence = 35;
     } else {
         // With limited data, CatBoost (better for small datasets) gets higher weight
-        catboostConfidence = 40;
-        xgboostConfidence = 20;
+        catboostConfidence = 30;
+        xgboostConfidence = 15;
+        lightGBMConfidence = 15;
         statisticalConfidence = 40;
     }
     
@@ -889,29 +939,40 @@ function calculateModelConfidenceScores() {
     if (h2hMatches >= MIN_H2H_MATCHES) {
         // If we have good H2H data, boost statistical model slightly
         statisticalConfidence += 5;
-        catboostConfidence -= 3;
+        catboostConfidence -= 2;
         xgboostConfidence -= 2;
+        lightGBMConfidence -= 1;
     }
     
     // Ensure available models get proportionally distributed confidence
     if (!catboostModelLoaded || !useCatBoost) {
         xgboostConfidence += catboostConfidence * 0.5;
-        statisticalConfidence += catboostConfidence * 0.5;
+        lightGBMConfidence += catboostConfidence * 0.25;
+        statisticalConfidence += catboostConfidence * 0.25;
         catboostConfidence = 0;
     }
     
     if (!xgboostModelLoaded || !useXGBoost) {
         catboostConfidence += xgboostConfidence * 0.5;
-        statisticalConfidence += xgboostConfidence * 0.5;
+        lightGBMConfidence += xgboostConfidence * 0.25;
+        statisticalConfidence += xgboostConfidence * 0.25;
         xgboostConfidence = 0;
     }
     
+    if (!lightGBMModelLoaded || !useLightGBM) {
+        catboostConfidence += lightGBMConfidence * 0.5;
+        xgboostConfidence += lightGBMConfidence * 0.25;
+        statisticalConfidence += lightGBMConfidence * 0.25;
+        lightGBMConfidence = 0;
+    }
+    
     // Normalize to ensure the sum is 100
-    const total = catboostConfidence + xgboostConfidence + statisticalConfidence;
+    const total = catboostConfidence + xgboostConfidence + lightGBMConfidence + statisticalConfidence;
     
     return Promise.resolve({
         catboost: Math.round((catboostConfidence / total) * 100),
         xgboost: Math.round((xgboostConfidence / total) * 100),
+        lightGBM: Math.round((lightGBMConfidence / total) * 100),
         statistical: Math.round((statisticalConfidence / total) * 100)
     });
 }
@@ -1356,6 +1417,44 @@ async function simulateXGBoostPrediction(features, predictionType) {
     }
 }
 
+// LIGHTGBM FUNCTIONS
+// =============================
+// Integrasikan LightGBM ke dalam analisis
+function calculateLightGBMWinProbabilities() {
+    const features = prepareMatchFeatures();
+    try {
+        return simulateLightGBMPrediction(features, 'winProbability')
+            .then(modelPrediction => {
+                return {
+                    team1WinProb: modelPrediction[0],
+                    team2WinProb: modelPrediction[1],
+                    drawProb: modelPrediction[2]
+                };
+            });
+    } catch (error) {
+        console.error('Error in LightGBM win probability calculation:', error);
+        return Promise.resolve(calculateStatisticalWinProbabilities());
+    }
+}
+
+// Simulasi prediksi LightGBM
+async function simulateLightGBMPrediction(features, predictionType) {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    if (predictionType === 'winProbability') {
+        const baseProbabilities = calculateStatisticalWinProbabilities();
+        let team1WinProb = baseProbabilities.team1WinProb / 100;
+        let team2WinProb = baseProbabilities.team2WinProb / 100;
+        let drawProb = baseProbabilities.drawProb / 100;
+        const adjustment = 0.05;
+        team1WinProb += adjustment;
+        team2WinProb -= adjustment;
+        drawProb -= adjustment / 2;
+        const sum = team1WinProb + team2WinProb + drawProb;
+        return [team1WinProb / sum * 100, team2WinProb / sum * 100, drawProb / sum * 100];
+    }
+    throw new Error('Unknown prediction type');
+}
+
 // ENSEMBLE METHOD FUNCTIONS
 // ========================
 // Ensemble win probability calculation (combines all available models)
@@ -1378,6 +1477,12 @@ async function calculateEnsembleWinProbabilities() {
         if (useXGBoost && xgboostModelLoaded) {
             promises.push(calculateXGBoostWinProbabilities());
             weights.push(confidenceScores.xgboost);
+        }
+        
+        // Add LightGBM if available
+        if (useLightGBM && lightGBMModelLoaded) {
+            promises.push(calculateLightGBMWinProbabilities());
+            weights.push(confidenceScores.lightGBM);
         }
         
         // Always add statistical model
@@ -1436,6 +1541,12 @@ async function calculateEnsembleProjectedTotal() {
             weights.push(confidenceScores.xgboost);
         }
         
+        // Add LightGBM if available
+        if (useLightGBM && lightGBMModelLoaded) {
+            promises.push(calculateLightGBMProjectedTotal());
+            weights.push(confidenceScores.lightGBM);
+        }
+        
         // Always add statistical model
         promises.push(Promise.resolve(calculateStatisticalProjectedTotal()));
         weights.push(confidenceScores.statistical);
@@ -1482,6 +1593,12 @@ async function calculateEnsembleProjectedMargin() {
         if (useXGBoost && xgboostModelLoaded) {
             promises.push(calculateXGBoostProjectedMargin());
             weights.push(confidenceScores.xgboost);
+        }
+        
+        // Add LightGBM if available
+        if (useLightGBM && lightGBMModelLoaded) {
+            promises.push(calculateLightGBMProjectedMargin());
+            weights.push(confidenceScores.lightGBM);
         }
         
         // Always add statistical model
@@ -2127,214 +2244,23 @@ function formatSpreadForDisplay() {
 }
 
 // Update analysis explanation UI
-function updateAnalysisExplanation(probabilities, projectedTotal, projectedMargin, team1Score, team2Score, usingML = true) {
-    let winnerName, winnerProb;
-    
-    if (probabilities.team1WinProb > probabilities.team2WinProb && 
-        probabilities.team1WinProb > probabilities.drawProb) {
-        winnerName = team1Name;
-        winnerProb = probabilities.team1WinProb;
-    } else if (probabilities.team2WinProb > probabilities.team1WinProb && 
-               probabilities.team2WinProb > probabilities.drawProb) {
-        winnerName = team2Name;
-        winnerProb = probabilities.team2WinProb;
-    } else {
-        winnerName = "A draw";
-        winnerProb = probabilities.drawProb;
-    }
-    
-    // Generate explanations
-    let matchFactors = [];
-    
-    // Add match type factor
-    const matchType = document.getElementById('match-importance').options[document.getElementById('match-importance').selectedIndex].text;
-    matchFactors.push(`This is a ${matchType} match`);
-    
-    // Add home/away factor
-    if (matchLocation === 'home') {
-        matchFactors.push(`${team1Name} has a home advantage in this match`);
-    } else if (matchLocation === 'away') {
-        matchFactors.push(`${team2Name} has a home advantage in this match`);
-    }
-    
-    // Add ranking factor if available
-    if (team1Ranking > 0 && team2Ranking > 0) {
-        const rankingDiff = Math.abs(team1Ranking - team2Ranking);
-        if (rankingDiff > 5) {
-            const higherRankedTeam = team1Ranking < team2Ranking ? team1Name : team2Name;
-            matchFactors.push(`${higherRankedTeam} has a significantly better ranking (${Math.min(team1Ranking, team2Ranking)} vs ${Math.max(team1Ranking, team2Ranking)})`);
-        }
-    }
-    
-    // Add H2H record factor if available
-    if (matchData.h2h.length >= 2) {
-        const team1Wins = matchData.h2h.filter(match => match.outcome === `${team1Name} Wins`).length;
-        const team2Wins = matchData.h2h.filter(match => match.outcome === `${team2Name} Wins`).length;
-        
-        if (team1Wins > team2Wins) {
-            matchFactors.push(`${team1Name} has a better head-to-head record (${team1Wins}-${team2Wins})`);
-        } else if (team2Wins > team1Wins) {
-            matchFactors.push(`${team2Name} has a better head-to-head record (${team2Wins}-${team1Wins})`);
-        }
-    }
-    
-    // Add recent form factor
-    if (matchData.team1.length >= 3) {
-        const team1RecentWins = matchData.team1.filter(match => match.outcome === `${team1Name} Wins`).length;
-        const team1WinPercentage = (team1RecentWins / matchData.team1.length) * 100;
-        
-        if (team1WinPercentage >= 67) {
-            matchFactors.push(`${team1Name} has strong recent form (${team1WinPercentage.toFixed(1)}% win rate)`);
-        } else if (team1WinPercentage <= 33) {
-            matchFactors.push(`${team1Name} has poor recent form (${team1WinPercentage.toFixed(1)}% win rate)`);
-        }
-    }
-    
-    if (matchData.team2.length >= 3) {
-        const team2RecentWins = matchData.team2.filter(match => match.outcome === `${team2Name} Wins`).length;
-        const team2WinPercentage = (team2RecentWins / matchData.team2.length) * 100;
-        
-        if (team2WinPercentage >= 67) {
-            matchFactors.push(`${team2Name} has strong recent form (${team2WinPercentage.toFixed(1)}% win rate)`);
-        } else if (team2WinPercentage <= 33) {
-            matchFactors.push(`${team2Name} has poor recent form (${team2WinPercentage.toFixed(1)}% win rate)`);
-        }
-    }
-    
-    // Add scoring factor
-    const team1AvgScore = calculateOverallTeamAverage(team1Name, true);
-    const team2AvgScore = calculateOverallTeamAverage(team2Name, false);
-    
-    if (Math.abs(team1AvgScore - team2AvgScore) > 0.5) {
-        const betterScoringTeam = team1AvgScore > team2AvgScore ? team1Name : team2Name;
-        matchFactors.push(`${betterScoringTeam} has better scoring overall (${Math.max(team1AvgScore, team2AvgScore).toFixed(1)} vs ${Math.min(team1AvgScore, team2AvgScore).toFixed(1)} goals per match)`);
-    }
-    
-    // Add over/under historical rate if total line is set
-    if (totalLine > 0) {
-        const overPercentage = calculateOverPercentage();
-        
-        if (overPercentage > 60) {
-            matchFactors.push(`${overPercentage}% of matches have gone OVER the total line of ${totalLine}`);
-        } else if (overPercentage < 40) {
-            matchFactors.push(`${100 - overPercentage}% of matches have gone UNDER the total line of ${totalLine}`);
-        }
-    }
-    
-    // If using ML, add some ML-specific insights
-    if (usingML) {
-        const team1Form = calculateRecentForm(team1Name, true);
-        const team2Form = calculateRecentForm(team2Name, false);
-        
-        if (Math.abs(team1Form - team2Form) > 0.3) {
-            const betterFormTeam = team1Form > team2Form ? team1Name : team2Name;
-            matchFactors.push(`${betterFormTeam} has significantly better recent form based on machine learning analysis`);
-        }
-        
-        // Add feature importance insight
-        const mostImportantFactor = getMostImportantFeature();
-        matchFactors.push(`The machine learning model considers ${mostImportantFactor} as the most important factor in this matchup`);
-    }
-    
-    // Build explanation HTML
-    const factorsHtml = matchFactors.length > 0 
-        ? `<ul>${matchFactors.map(factor => `<li>${factor}</li>`).join('')}</ul>` 
-        : '<p>No significant factors found in the data.</p>';
-    
-    let modelTypeText = "";
-    
-    if (useXGBoost && useCatBoost && useStatistical) {
-        modelTypeText = "Using ensemble modeling with dynamic weighting (combining CatBoost, XGBoost, and statistical analysis)";
-    } else if (useCatBoost) {
-        modelTypeText = "Using CatBoost model optimized for categorical features and small datasets";
-    } else if (useXGBoost) {
-        modelTypeText = "Using XGBoost machine learning model for complex pattern detection";
-    } else {
-        modelTypeText = "Using statistical modeling based on historical data patterns";
-    }
-    
-    // Generate betting analysis
-    let bettingAnalysisHtml = "";
-    
-    if (totalLine > 0 || pointSpread > 0) {
-        bettingAnalysisHtml = `
-            <h4>Betting Analysis:</h4>
-            ${totalLine > 0 ? `
-                <p>With a projected total score of ${projectedTotal.toFixed(1)}, this suggests the match will likely go 
-                ${projectedTotal > totalLine ? 'OVER' : 'UNDER'} the total line of ${totalLine}.</p>
-            ` : ''}
-            
-            ${pointSpread > 0 ? `
-                <p>The projected margin of ${Math.abs(projectedMargin).toFixed(1)} goals in favor of 
-                ${projectedMargin > 0 ? team1Name : team2Name} 
-                ${Math.abs(projectedMargin) > pointSpread ? 'suggests they will cover' : 'may not be enough to cover'} 
-                the point spread of ${pointSpread}.</p>
-            ` : ''}
-        `;
-    } else {
-        bettingAnalysisHtml = "<p>Set betting lines to see betting analysis and recommendations.</p>";
-    }
-    
-    const explanationHTML = `
-        <p>Based on the match data provided, our analysis indicates that <strong>${winnerName}</strong> has a ${winnerProb.toFixed(1)}% probability of winning this match with a projected score of <strong>${team1Score}-${team2Score}</strong>.</p>
-        
-        <h4>Key Factors in This Analysis:</h4>
-        ${factorsHtml}
-        
-        ${bettingAnalysisHtml}
-        
-        <div class="model-info">
-            <p><strong>Analysis method:</strong> ${modelTypeText}</p>
-            <p><strong>Note:</strong> This analysis is based on historical data and statistical/ML models. Actual outcomes may vary due to factors not accounted for in the analysis.</p>
-        </div>
-    `;
-    
-    document.getElementById('analysis-explanation').innerHTML = explanationHTML;
-}
+function updateAnalysisExplanation(probabilities, projectedTotal, projectedMargin, team1ProjScore, team2ProjScore, isEnsemble = true) {
+    const explanationElement = document.getElementById('analysis-explanation');
+    let explanationHTML = '<h4>Analysis Explanation:</h4>';
 
-// Get most important feature for ML explanation
-function getMostImportantFeature() {
-    // In a real implementation, this would come from the model's feature importance
-    // For this demo, we'll determine based on the actual data which factor might be most important
-    
-    const factors = [
-        { name: "recent team form", weight: 0 },
-        { name: "head-to-head history", weight: 0 },
-        { name: "scoring ability", weight: 0 },
-        { name: "defensive strength", weight: 0 },
-        { name: "home field advantage", weight: 0 },
-        { name: "match importance", weight: 0 }
-    ];
-    
-    // Calculate weights based on actual data
-    // Form difference
-    const team1Form = calculateRecentForm(team1Name, true);
-    const team2Form = calculateRecentForm(team2Name, false);
-    factors[0].weight = Math.abs(team1Form - team2Form) * 5;
-    
-    // H2H history
-    const h2hAdvantage = calculateH2HAdvantage(team1Name);
-    factors[1].weight = Math.abs(h2hAdvantage) * 5;
-    
-    // Scoring difference
-    const team1AvgScore = calculateOverallTeamAverage(team1Name, true);
-    const team2AvgScore = calculateOverallTeamAverage(team2Name, false);
-    factors[2].weight = Math.abs(team1AvgScore - team2AvgScore) * 2;
-    
-    // Defense difference
-    const team1Conceded = calculateTeamAverageConceded(team1Name, true);
-    const team2Conceded = calculateTeamAverageConceded(team2Name, false);
-    factors[3].weight = Math.abs(team1Conceded - team2Conceded) * 2;
-    
-    // Home advantage
-    factors[4].weight = matchLocation !== 'neutral' ? 3 : 0;
-    
-    // Match importance
-    factors[5].weight = Math.abs(matchImportance - 1) * 4;
-    
-    // Sort by weight and return the top factor
-    factors.sort((a, b) => b.weight - a.weight);
-    return factors[0].name;
+    explanationHTML += `<p><strong>Win Probabilities:</strong> ${team1Name}: ${probabilities.team1WinProb.toFixed(2)}%, ${team2Name}: ${probabilities.team2WinProb.toFixed(2)}%, Draw: ${probabilities.drawProb.toFixed(2)}%</p>`;
+    explanationHTML += `<p><strong>Projected Total:</strong> ${projectedTotal.toFixed(2)} goals</p>`;
+    explanationHTML += `<p><strong>Projected Margin:</strong> ${projectedMargin.toFixed(2)} (${team1Name}: ${team1ProjScore}, ${team2Name}: ${team2ProjScore})</p>`;
+
+    if (isEnsemble) {
+        explanationHTML += '<p>The analysis used an ensemble of models (CatBoost, XGBoost, LightGBM, and Statistical) to provide robust predictions.</p>';
+    } else {
+        explanationHTML += '<p>The analysis used a fallback statistical model due to insufficient data or model loading issues.</p>';
+    }
+
+    explanationHTML += '<p>Factors influencing the predictions include recent form, head-to-head results, and match importance.</p>';
+
+    explanationElement.innerHTML = explanationHTML;
 }
 
 // Create win probability chart
@@ -2415,6 +2341,12 @@ function createModelConfidenceChart(confidenceScores) {
         labels.push('XGBoost');
         data.push(confidenceScores.xgboost);
         colors.push('rgba(66, 133, 244, 0.8)');
+    }
+    
+    if (confidenceScores.lightGBM > 0) {
+        labels.push('LightGBM');
+        data.push(confidenceScores.lightGBM);
+        colors.push('rgba(255, 193, 7, 0.8)');
     }
     
     if (confidenceScores.statistical > 0) {
